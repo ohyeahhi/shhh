@@ -85,26 +85,38 @@
     }
   }
 
-  // 쉬~ 쉬~: 부모가 입으로 내는 소리. 한 번 한 번 길이와 세기가 조금씩 다릅니다.
+  // 쉬~ 쉬~: 부모가 입으로 길게 내는 "쉬~~~~ 쉬~~~~~~~~" 소리.
+  // 한 번에 3~5초씩 길게 내고, 사이에 숨 들이쉬는 짧은 틈(약 0.5초)이 있습니다.
+  // 길이를 들쭉날쭉하게 섞어 기계적으로 들리지 않게 합니다.
+  const SHUSH_PATTERN = [3.0, 4.5, 3.5, 5.0, 3.0, 4.0]; // 각 회차 길이(초, 틈 포함), 합계 23초
+  const SHUSH_SECONDS = SHUSH_PATTERN.reduce((a, b) => a + b, 0);
+
   function shush(d, rate, len) {
     white(d);
-    const count = 12; // 12초 버퍼에 12번
-    const cycle = len / count;
-    const shapes = [];
-    for (let n = 0; n < count; n++) {
-      shapes.push({ on: 0.62 + Math.random() * 0.12, amp: 0.8 + Math.random() * 0.2 });
-    }
-    for (let i = 0; i < d.length; i++) {
-      const j = i % len;
-      const n = Math.floor(j / cycle);
-      const p = (j - n * cycle) / cycle; // 한 번 안에서의 위치 0..1
-      const s = shapes[n];
-      let env = 0;
-      if (p < 0.08) env = p / 0.08;
-      else if (p < s.on) env = 1 - 0.35 * ((p - 0.08) / (s.on - 0.08));
-      else if (p < s.on + 0.12) env = 0.65 * (1 - (p - s.on) / 0.12);
-      d[i] *= env * s.amp + 0.04;
-    }
+    const scale = len / (SHUSH_SECONDS * rate); // 반올림 오차 보정
+    const env = new Float32Array(len);
+    let pos = 0;
+    SHUSH_PATTERN.forEach((sec) => {
+      const total = Math.round(sec * rate * scale);
+      const gap = Math.round((0.4 + Math.random() * 0.2) * rate);
+      const body = total - gap;
+      const attack = 0.12 * rate;
+      const release = 0.35 * rate;
+      const wobble = Math.random() * Math.PI * 2;
+      for (let k = 0; k < total && pos + k < len; k++) {
+        let e = 0;
+        if (k < body) {
+          const t = k / body;
+          // 숨이 줄어들며 끝으로 갈수록 살짝 약해지고, 미세하게 흔들림
+          e = (1 - 0.25 * t) * (1 + 0.05 * Math.sin(2 * Math.PI * 0.7 * (k / rate) + wobble));
+          if (k < attack) e *= k / attack;
+          if (k > body - release) e *= (body - k) / release;
+        }
+        env[pos + k] = e;
+      }
+      pos += total;
+    });
+    for (let i = 0; i < d.length; i++) d[i] *= env[i % len] + 0.03;
   }
 
   // 엄마 뱃속: 낮은 혈류 소리 + 분당 72회 심장박동(쿵-쿵)
@@ -191,7 +203,7 @@
   // gain: 소리마다 체감 크기를 비슷하게 맞추는 보정값 (필터 후 RMS 기준 약 -21dB)
   window.Noise = {
     sounds: [
-      { id: 'shush', gain: 1.2, name: '쉬~ 쉬~', emoji: '🤫', desc: '엄마 아빠가 내는 쉬~ 소리', seconds: 12, fill: shush, filter: { type: 'bandpass', frequency: 3000, Q: 0.6 } },
+      { id: 'shush', gain: 1.1, name: '쉬~ 쉬~', emoji: '🤫', desc: '엄마 아빠가 내는 쉬~ 소리', seconds: SHUSH_SECONDS, fill: shush, filter: { type: 'bandpass', frequency: 3000, Q: 0.6 } },
       { id: 'womb', gain: 1.4, name: '엄마 뱃속', emoji: '🤰', desc: '심장 소리와 뱃속 소리', seconds: 10, fill: womb, filter: { type: 'lowpass', frequency: 600 } },
       { id: 'dryer', gain: 0.77, name: '드라이기', emoji: '💨', desc: '헤어드라이어 소리', seconds: 10, fill: dryer, filter: { type: 'lowpass', frequency: 6000 } },
       { id: 'vacuum', gain: 0.8, name: '청소기', emoji: '🧹', desc: '윙~ 하는 청소기 소리', seconds: 10, fill: vacuum, filter: { type: 'lowpass', frequency: 7000 } },
