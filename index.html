@@ -20,12 +20,15 @@
       <h1>어떤 소리로<br>재워볼까요?</h1>
     </header>
 
-    <section class="card now" id="now-card" aria-live="polite">
-      <span class="now-icon" id="now-emoji"></span>
-      <span class="now-text">
-        <span class="now-name" id="now-name"></span>
-        <span class="now-status" id="now-status"></span>
-      </span>
+    <section class="card now" id="now-card">
+      <div class="now-main" aria-live="polite">
+        <span class="now-icon" id="now-emoji"></span>
+        <span class="now-text">
+          <span class="now-name" id="now-name"></span>
+          <span class="now-status" id="now-status"></span>
+        </span>
+      </div>
+      <div class="mix" id="mix" hidden></div>
     </section>
 
     <section class="group" aria-labelledby="presets-title">
@@ -43,9 +46,9 @@
       <div class="chips" id="preset-list"></div>
     </section>
 
-    <section class="group" aria-labelledby="sounds-title">
-      <h2 id="sounds-title">소리</h2>
-      <div class="card list" id="sounds"></div>
+    <section class="sound-groups" aria-label="소리 고르기">
+      <p class="hint">소리를 누르면 바뀌고, <b>＋</b>를 누르면 겹쳐서 들을 수 있어요</p>
+      <div id="sounds" class="sound-groups"></div>
     </section>
 
     <section class="group" aria-labelledby="level-title">
@@ -104,15 +107,30 @@
     </p>
   </div>
 
+  <div id="toast" class="toast" role="status" hidden></div>
+
   <template id="sound-tpl">
-    <button class="sound" role="radio" aria-checked="false">
-      <span class="sound-icon"></span>
-      <span class="sound-text">
-        <span class="name"></span>
-        <span class="desc"></span>
-      </span>
-      <span class="check" aria-hidden="true"></span>
-    </button>
+    <div class="sound">
+      <button class="sound-main">
+        <span class="sound-icon"></span>
+        <span class="sound-text">
+          <span class="name"></span>
+          <span class="desc"></span>
+        </span>
+      </button>
+      <button class="layer-btn" aria-pressed="false"></button>
+    </div>
+  </template>
+
+  <template id="mix-tpl">
+    <div class="mix-row">
+      <span class="mix-icon"></span>
+      <span class="mix-name"></span>
+      <button class="mini-step mix-down">−</button>
+      <span class="mini-meter"><span class="mini-fill"></span></span>
+      <button class="mini-step mix-up">+</button>
+      <button class="mix-remove"></button>
+    </div>
   </template>
 
   <script src="noise.js"></script>

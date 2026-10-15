@@ -6,15 +6,19 @@
   const TIMER_FADE = 30; // 자동 끄기 직전 서서히 줄어드는 시간(초)
   const NIGHT_IDLE = 20; // 재생 중 이 시간(초) 동안 손대지 않으면 화면 어둡게
   const MAX_LEVEL = 10;
+  const MAX_LAYERS = 4; // 겹칠 수 있는 소리 수
+  const LAYER_DEFAULT = 7; // 겹친 소리 하나하나의 기본 크기(1..10)
 
   const $ = (sel) => document.querySelector(sel);
   const playBtn = $('#play');
   const soundsEl = $('#sounds');
-  const tpl = $('#sound-tpl');
+  const soundTpl = $('#sound-tpl');
+  const mixTpl = $('#mix-tpl');
   const nowCard = $('#now-card');
   const nowEmoji = $('#now-emoji');
   const nowName = $('#now-name');
   const nowStatus = $('#now-status');
+  const mixEl = $('#mix');
   const levelValue = $('#level-value');
   const levelFill = $('#level-fill');
   const levelMeter = $('#level-meter');
@@ -28,28 +32,30 @@
   const presetForm = $('#preset-form');
   const presetName = $('#preset-name');
   const presetSave = $('#preset-save');
+  const toastEl = $('#toast');
 
   // 기본 제공 설정 (삭제 불가)
   const BUILTIN_PRESETS = [
-    { id: 'b-nap', name: '낮잠', sound: 'shush', level: 5, timer: 30 },
-    { id: 'b-night', name: '밤잠', sound: 'womb', level: 4, timer: 0 },
+    { id: 'b-nap', name: '낮잠', layers: [{ id: 'shush', level: 7 }], level: 5, timer: 30 },
+    { id: 'b-night', name: '밤잠', layers: [{ id: 'womb', level: 7 }], level: 4, timer: 0 },
+    { id: 'b-rain', name: '비 오는 밤', layers: [{ id: 'rain', level: 7 }, { id: 'womb', level: 5 }], level: 4, timer: 60 },
+    { id: 'b-forest', name: '숲속', layers: [{ id: 'stream', level: 7 }, { id: 'birds', level: 5 }, { id: 'wind', level: 4 }], level: 5, timer: 30 },
   ];
 
   const byId = {};
   Noise.sounds.forEach((s) => { byId[s.id] = s; });
 
-  const state = Object.assign({ sound: 'shush', level: 5, timer: 30, presets: [] }, load());
-  if (!byId[state.sound]) state.sound = 'shush';
-  if (!Array.isArray(state.presets)) state.presets = [];
+  const state = migrate(load());
 
   let ctx = null;
   let masterGain = null;
   let playing = false;
-  let current = null; // { id, source, gain }
+  const nodes = {}; // 소리 id -> { source, gain }
   const buffers = {};
   let timerEnd = 0;
   let wakeLock = null;
   let idleTimer = null;
+  let toastTimer = null;
 
   // ---------- 저장 ----------
   function load() {
@@ -57,6 +63,25 @@
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
+  }
+  // 예전 형식(소리 하나만 저장)을 겹치기 형식으로 바꾸고, 없어진 소리는 걸러냄
+  function cleanLayers(layers, fallbackId) {
+    let out = Array.isArray(layers) ? layers.filter((l) => l && byId[l.id]) : [];
+    if (!out.length && byId[fallbackId]) out = [{ id: fallbackId, level: LAYER_DEFAULT }];
+    return out.slice(0, MAX_LAYERS);
+  }
+  function migrate(saved) {
+    const st = Object.assign({ level: 5, timer: 30, presets: [] }, saved);
+    st.layers = cleanLayers(st.layers, st.sound);
+    if (!st.layers.length) st.layers = [{ id: 'shush', level: LAYER_DEFAULT }];
+    delete st.sound;
+    st.presets = (Array.isArray(st.presets) ? st.presets : [])
+      .map((p) => {
+        const layers = cleanLayers(p.layers, p.sound);
+        return { id: p.id, name: p.name, layers, level: p.level, timer: p.timer };
+      })
+      .filter((p) => p.layers.length);
+    return st;
   }
 
   // ---------- 오디오 ----------
@@ -70,11 +95,23 @@
     }
     masterGain = ctx.createGain();
     masterGain.gain.value = 0;
-    masterGain.connect(ctx.destination);
+    // 여러 소리를 겹쳐도 찢어지는 소리가 나지 않게 막아주는 리미터
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    masterGain.connect(limiter);
+    limiter.connect(ctx.destination);
   }
 
-  // 단계(1..10)를 귀에 자연스러운 곡선으로 변환. 최대치도 넉넉히 낮게 잡음.
+  // 전체 크기 단계(1..10)를 귀에 자연스러운 곡선으로 변환. 최대치도 넉넉히 낮게 잡음.
   function levelGain(level) { return 0.85 * Math.pow(level / MAX_LEVEL, 2); }
+  // 겹친 소리 하나의 크기: 기본값(7)일 때 보정값 그대로
+  function layerGain(layer) {
+    return (byId[layer.id].gain || 1) * Math.pow(layer.level / LAYER_DEFAULT, 2);
+  }
 
   function ramp(param, value, seconds) {
     const now = ctx.currentTime;
@@ -83,12 +120,12 @@
     param.linearRampToValueAtTime(value, now + seconds);
   }
 
-  function startSound(id) {
-    const sound = byId[id];
-    if (!buffers[id]) buffers[id] = Noise.makeBuffer(ctx, sound);
+  function startNode(layer) {
+    const sound = byId[layer.id];
+    if (!buffers[layer.id]) buffers[layer.id] = Noise.makeBuffer(ctx, sound);
 
     const source = ctx.createBufferSource();
-    source.buffer = buffers[id];
+    source.buffer = buffers[layer.id];
     source.loop = true;
 
     const gain = ctx.createGain();
@@ -106,26 +143,35 @@
     head.connect(gain);
     gain.connect(masterGain);
     source.start();
-    ramp(gain.gain, sound.gain || 1, FADE);
-    current = { id, source, gain };
+    ramp(gain.gain, layerGain(layer), FADE);
+    nodes[layer.id] = { source, gain };
   }
 
-  function stopCurrent() {
-    if (!current) return;
-    const { source, gain } = current;
-    current = null;
-    ramp(gain.gain, 0, FADE);
-    source.stop(ctx.currentTime + FADE + 0.05);
+  function stopNode(id) {
+    const n = nodes[id];
+    if (!n) return;
+    delete nodes[id];
+    ramp(n.gain.gain, 0, FADE);
+    n.source.stop(ctx.currentTime + FADE + 0.05);
+  }
+
+  // 재생 중인 소리를 state.layers에 맞춤: 새 소리는 켜고, 빠진 소리는 끄고, 크기는 맞춤
+  function syncAudio(seconds) {
+    if (!playing) return;
+    const wanted = {};
+    state.layers.forEach((l) => {
+      wanted[l.id] = true;
+      if (nodes[l.id]) ramp(nodes[l.id].gain.gain, layerGain(l), seconds);
+      else startNode(l);
+    });
+    Object.keys(nodes).forEach((id) => { if (!wanted[id]) stopNode(id); });
   }
 
   async function play() {
     ensureContext();
     await ctx.resume();
-    if (!current || current.id !== state.sound) {
-      stopCurrent();
-      startSound(state.sound);
-    }
     playing = true;
+    syncAudio(FADE);
     timerEnd = state.timer ? Date.now() + state.timer * 60 * 1000 : 0;
     applyMaster();
     requestWakeLock();
@@ -140,7 +186,10 @@
     ramp(masterGain.gain, 0, FADE);
     setTimeout(() => {
       if (!playing) {
-        if (current) { current.source.stop(); current = null; }
+        Object.keys(nodes).forEach((id) => {
+          nodes[id].source.stop();
+          delete nodes[id];
+        });
         ctx.suspend();
       }
     }, FADE * 1000 + 100);
@@ -169,16 +218,49 @@
     g.linearRampToValueAtTime(0, now + Math.max(left, 0.1));
   }
 
-  function selectSound(id) {
-    state.sound = id;
-    if (playing) {
-      if (!current || current.id !== id) {
-        stopCurrent();
-        startSound(id);
+  // 레이어가 바뀐 뒤 공통 처리: 재생 중이면 소리 맞추고, 아니면 재생 시작
+  function layersChanged() {
+    if (playing) syncAudio(FADE);
+    else play();
+    save();
+    update();
+  }
+
+  function findLayer(id) {
+    return state.layers.find((l) => l.id === id);
+  }
+
+  // 소리 줄을 누름: 이 소리 하나로 바꿈
+  function soloSound(id) {
+    const existing = findLayer(id);
+    state.layers = [{ id, level: existing ? existing.level : LAYER_DEFAULT }];
+    layersChanged();
+  }
+
+  // ＋ 버튼: 겹치기 켜고 끄기
+  function toggleLayer(id) {
+    if (findLayer(id)) {
+      if (state.layers.length === 1) {
+        toast('소리가 하나는 있어야 해요');
+        return;
       }
+      state.layers = state.layers.filter((l) => l.id !== id);
     } else {
-      play();
+      if (state.layers.length >= MAX_LAYERS) {
+        toast('소리는 ' + MAX_LAYERS + '개까지 겹칠 수 있어요');
+        return;
+      }
+      state.layers.push({ id, level: LAYER_DEFAULT });
+      toast(byId[id].name + ' 소리를 겹쳤어요');
     }
+    layersChanged();
+  }
+
+  function setLayerLevel(id, delta) {
+    const l = findLayer(id);
+    if (!l) return;
+    l.level = Math.max(1, Math.min(MAX_LEVEL, l.level + delta));
+    syncAudio(0.1);
     save();
     update();
   }
@@ -198,6 +280,13 @@
     }
     save();
     update();
+  }
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2000);
   }
 
   // ---------- 화면 켜둠 / 어둡게 ----------
@@ -233,26 +322,30 @@
   night.addEventListener('click', hideNight);
 
   // ---------- 프리셋 ----------
+  function sameLayers(a, b) {
+    if (a.length !== b.length) return false;
+    return a.every((x) => b.some((y) => y.id === x.id && y.level === x.level));
+  }
   function matches(p) {
-    return p.sound === state.sound && p.level === state.level && p.timer === state.timer;
+    return sameLayers(p.layers, state.layers) && p.level === state.level && p.timer === state.timer;
+  }
+  function copyLayers(layers) {
+    return layers.map((l) => ({ id: l.id, level: l.level }));
   }
 
   function applyPreset(p) {
+    state.layers = copyLayers(p.layers);
     state.level = p.level;
     state.timer = p.timer;
-    state.sound = p.sound;
     if (playing) {
-      if (!current || current.id !== p.sound) {
-        stopCurrent();
-        startSound(p.sound);
-      }
+      syncAudio(FADE);
       timerEnd = p.timer ? Date.now() + p.timer * 60 * 1000 : 0;
       applyMaster();
+      save();
+      update();
     } else {
-      play();
+      layersChanged();
     }
-    save();
-    update();
   }
 
   function renderPresets() {
@@ -314,13 +407,14 @@
     e.preventDefault();
     const name = presetName.value.trim();
     if (!name) return;
-    const setting = { sound: state.sound, level: state.level, timer: state.timer };
+    const setting = { layers: copyLayers(state.layers), level: state.level, timer: state.timer };
     const existing = state.presets.find((p) => p.name === name);
     if (existing) Object.assign(existing, setting);
     else state.presets.push(Object.assign({ id: 'u-' + Date.now(), name }, setting));
     save();
     closePresetForm();
     renderPresets();
+    toast('"' + name + '" 설정을 저장했어요');
   });
 
   // ---------- 화면 갱신 ----------
@@ -332,30 +426,62 @@
     const s = left % 60;
     return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
   }
-
+  function timerLabel(min) {
+    return min >= 60 ? min / 60 + '시간' : min + '분';
+  }
   function statusText() {
     if (!playing) {
       return state.timer ? timerLabel(state.timer) + ' 뒤에 꺼지도록 준비했어요' : '끄지 않고 계속 들려줘요';
     }
     return timerEnd ? '재우는 중 · ' + formatLeft() + ' 남았어요' : '재우는 중 · 계속 들려줘요';
   }
-  function timerLabel(min) {
-    return min >= 60 ? min / 60 + '시간' : min + '분';
+  function layerNames() {
+    return state.layers.map((l) => byId[l.id].name).join(' + ');
+  }
+
+  function renderMix() {
+    mixEl.textContent = '';
+    mixEl.hidden = state.layers.length < 2;
+    if (mixEl.hidden) return;
+    state.layers.forEach((l) => {
+      const s = byId[l.id];
+      const row = mixTpl.content.firstElementChild.cloneNode(true);
+      row.querySelector('.mix-icon').textContent = s.emoji;
+      row.querySelector('.mix-name').textContent = s.name;
+      row.querySelector('.mini-fill').style.width = (l.level / MAX_LEVEL) * 100 + '%';
+      const down = row.querySelector('.mix-down');
+      const up = row.querySelector('.mix-up');
+      down.setAttribute('aria-label', s.name + ' 작게');
+      up.setAttribute('aria-label', s.name + ' 크게');
+      down.disabled = l.level <= 1;
+      up.disabled = l.level >= MAX_LEVEL;
+      down.addEventListener('click', () => setLayerLevel(l.id, -1));
+      up.addEventListener('click', () => setLayerLevel(l.id, 1));
+      const remove = row.querySelector('.mix-remove');
+      remove.setAttribute('aria-label', s.name + ' 빼기');
+      remove.addEventListener('click', () => toggleLayer(l.id));
+      mixEl.appendChild(row);
+    });
   }
 
   function update() {
-    const sound = byId[state.sound];
     playBtn.setAttribute('aria-pressed', String(playing));
     playBtn.textContent = playing ? '그만하기' : '재우기';
     nowCard.classList.toggle('playing', playing);
-    nowEmoji.textContent = sound.emoji;
-    nowName.textContent = sound.name;
+    nowEmoji.textContent = byId[state.layers[0].id].emoji;
+    const first = byId[state.layers[0].id].name;
+    nowName.textContent = state.layers.length > 1 ? first + ' 외 ' + (state.layers.length - 1) + '개' : first;
     nowStatus.textContent = statusText();
-    nightSound.textContent = sound.name;
+    nightSound.textContent = layerNames();
     nightRemaining.textContent = timerEnd ? formatLeft() + ' 남았어요' : '계속 들려주는 중';
+    renderMix();
 
     soundsEl.querySelectorAll('.sound').forEach((el) => {
-      el.setAttribute('aria-checked', String(el.dataset.id === state.sound));
+      const on = !!findLayer(el.dataset.id);
+      el.classList.toggle('on', on);
+      const btn = el.querySelector('.layer-btn');
+      btn.setAttribute('aria-pressed', String(on));
+      btn.setAttribute('aria-label', byId[el.dataset.id].name + (on ? ' 빼기' : ' 겹치기'));
     });
 
     levelValue.textContent = state.level + ' / ' + MAX_LEVEL;
@@ -382,14 +508,26 @@
   }, 1000);
 
   // ---------- 화면 만들기 ----------
-  Noise.sounds.forEach((s) => {
-    const el = tpl.content.firstElementChild.cloneNode(true);
-    el.dataset.id = s.id;
-    el.querySelector('.sound-icon').textContent = s.emoji;
-    el.querySelector('.name').textContent = s.name;
-    el.querySelector('.desc').textContent = s.desc;
-    el.addEventListener('click', () => selectSound(s.id));
-    soundsEl.appendChild(el);
+  Noise.groups.forEach((g) => {
+    const section = document.createElement('section');
+    section.className = 'group';
+    const h = document.createElement('h2');
+    h.textContent = g.name;
+    const list = document.createElement('div');
+    list.className = 'card list';
+    section.append(h, list);
+
+    Noise.sounds.filter((s) => s.group === g.id).forEach((s) => {
+      const el = soundTpl.content.firstElementChild.cloneNode(true);
+      el.dataset.id = s.id;
+      el.querySelector('.sound-icon').textContent = s.emoji;
+      el.querySelector('.name').textContent = s.name;
+      el.querySelector('.desc').textContent = s.desc;
+      el.querySelector('.sound-main').addEventListener('click', () => soloSound(s.id));
+      el.querySelector('.layer-btn').addEventListener('click', () => toggleLayer(s.id));
+      list.appendChild(el);
+    });
+    soundsEl.appendChild(section);
   });
 
   playBtn.addEventListener('click', () => (playing ? stop() : play()));

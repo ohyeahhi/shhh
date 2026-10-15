@@ -167,6 +167,161 @@
     motor(d, rate, 95, 3, 0.04);
   }
 
+  // 이벤트(새 지저귐, 풀벌레 울음 등)를 버퍼 길이(len) 안에서 감싸 돌도록 더합니다.
+  // 끝을 넘친 부분은 앞쪽으로 이어져서 반복 지점에서 소리가 잘리지 않습니다.
+  function addWrapped(d, len, start, samples) {
+    for (let k = 0; k < samples.length; k++) d[(start + k) % len] += samples[k];
+  }
+  // len 뒤쪽(크로스페이드용 여분)을 앞부분 복사로 채워 반복이 매끄럽게 함
+  function copyTail(d, len) {
+    for (let i = len; i < d.length; i++) d[i] = d[i - len];
+  }
+
+  // 파도: 브라운+핑크 노이즈에 느린 파도 엔벨로프를 입힘
+  function ocean(d, rate, len) {
+    const p = new Float32Array(d.length);
+    brown(d);
+    pink(p);
+    const waves = [
+      { cycles: 4, amp: 1, phase: 0 },
+      { cycles: 3, amp: 0.5, phase: 1.3 },
+      { cycles: 7, amp: 0.25, phase: 2.1 },
+    ];
+    for (let i = 0; i < d.length; i++) {
+      const t = (i % len) / len;
+      let env = 0;
+      for (const w of waves) env += w.amp * Math.sin(2 * Math.PI * w.cycles * t + w.phase);
+      env = Math.pow((env / 1.75 + 1) / 2, 2.2); // 0..1, 파도가 부서지는 느낌으로 날카롭게
+      d[i] = (d[i] * 0.6 + p[i] * env * 1.2) * (0.25 + env);
+    }
+  }
+
+  // 시냇물: 졸졸 흐르는 물소리 + 작은 물방울이 '퐁' 하고 터지는 소리
+  function stream(d, rate, len) {
+    pink(d);
+    for (let i = 0; i < d.length; i++) d[i] *= 0.35;
+    const bubbles = Math.floor((len / rate) * 45);
+    for (let n = 0; n < bubbles; n++) {
+      const f0 = 400 + Math.random() * 1400;
+      const tau = 0.006 + Math.random() * 0.014;
+      const dur = Math.floor(tau * 6 * rate);
+      const amp = Math.pow(Math.random(), 2) * 0.5;
+      const out = new Float32Array(dur);
+      let phase = 0;
+      for (let k = 0; k < dur; k++) {
+        const t = k / rate;
+        phase += (2 * Math.PI * f0 * (1 + (t / tau) * 0.15)) / rate; // 물방울은 음이 살짝 올라감
+        out[k] = Math.sin(phase) * Math.exp(-t / tau) * amp * Math.min(1, k / 20);
+      }
+      addWrapped(d, len, Math.floor(Math.random() * len), out);
+    }
+    copyTail(d, len);
+  }
+
+  // 바람: 노이즈를 공명 필터에 통과시키고, 필터 음높이와 세기를 천천히 출렁이게 함
+  function wind(d, rate, len) {
+    let low = 0, band = 0;
+    for (let i = 0; i < d.length; i++) {
+      const t = (i % len) / len;
+      const gust = 0.5 + 0.3 * Math.sin(2 * Math.PI * t + 0.5) + 0.15 * Math.sin(2 * Math.PI * 3 * t + 2) + 0.05 * Math.sin(2 * Math.PI * 7 * t);
+      const fc = 180 + 650 * gust;
+      const f = 2 * Math.sin((Math.PI * fc) / rate);
+      const w = Math.random() * 2 - 1;
+      const high = w - low - 0.5 * band;
+      band += f * high;
+      low += f * band;
+      d[i] = (band * 0.7 + low * 0.3) * (0.3 + gust);
+    }
+  }
+
+  // 풀벌레: 여름밤 귀뚜라미 세 마리가 각자 다른 박자로 '찌르르' 울음
+  function crickets(d, rate, len) {
+    pink(d);
+    for (let i = 0; i < d.length; i++) d[i] *= 0.04;
+    const bugs = [
+      { freq: 4200, every: 0.62, pulses: 3, amp: 0.25 },
+      { freq: 4700, every: 0.81, pulses: 4, amp: 0.15 },
+      { freq: 5100, every: 1.07, pulses: 3, amp: 0.1 },
+    ];
+    bugs.forEach((b) => {
+      const pulseLen = Math.floor(0.018 * rate);
+      const step = Math.floor(0.032 * rate);
+      const chirp = new Float32Array(step * b.pulses);
+      for (let p = 0; p < b.pulses; p++) {
+        for (let k = 0; k < pulseLen; k++) {
+          const e = Math.sin((Math.PI * k) / pulseLen);
+          chirp[p * step + k] = Math.sin((2 * Math.PI * b.freq * k) / rate) * e * e * b.amp;
+        }
+      }
+      for (let t = Math.random() * b.every; t < len / rate; t += b.every * (0.9 + Math.random() * 0.2)) {
+        addWrapped(d, len, Math.floor(t * rate), chirp);
+      }
+    });
+    copyTail(d, len);
+  }
+
+  // 새소리: 서로 다른 새 두세 마리가 띄엄띄엄 지저귐 + 아주 작은 나뭇잎 소리
+  function birds(d, rate, len) {
+    pink(d);
+    for (let i = 0; i < d.length; i++) d[i] *= 0.03;
+    const species = [
+      // 위에서 아래로 떨어지는 '삐요'
+      { lo: 2600, hi: 4200, dur: [0.08, 0.16], notes: [3, 6], gap: 0.06, shape: 'down', amp: 0.35 },
+      // 빠르게 떨리는 '찌르릇'
+      { lo: 3800, hi: 5200, dur: [0.15, 0.3], notes: [1, 3], gap: 0.12, shape: 'trill', amp: 0.2 },
+      // 올라가는 '휘익'
+      { lo: 2000, hi: 3400, dur: [0.2, 0.35], notes: [1, 2], gap: 0.2, shape: 'up', amp: 0.25 },
+    ];
+    const seconds = len / rate;
+    species.forEach((sp, si) => {
+      let t = Math.random() * 2 + si;
+      while (t < seconds) {
+        const notes = sp.notes[0] + Math.floor(Math.random() * (sp.notes[1] - sp.notes[0] + 1));
+        let nt = t;
+        for (let n = 0; n < notes; n++) {
+          const dur = sp.dur[0] + Math.random() * (sp.dur[1] - sp.dur[0]);
+          const samples = Math.floor(dur * rate);
+          const out = new Float32Array(samples);
+          const jitter = 1 + (Math.random() - 0.5) * 0.1;
+          let phase = 0;
+          for (let k = 0; k < samples; k++) {
+            const x = k / samples;
+            let f;
+            if (sp.shape === 'down') f = sp.hi - (sp.hi - sp.lo) * x;
+            else if (sp.shape === 'up') f = sp.lo + (sp.hi - sp.lo) * x * x;
+            else f = (sp.lo + sp.hi) / 2 + ((sp.hi - sp.lo) / 2) * Math.sin(2 * Math.PI * 28 * x * dur);
+            phase += (2 * Math.PI * f * jitter) / rate;
+            const e = Math.sin(Math.PI * x);
+            out[k] = Math.sin(phase) * e * e * sp.amp;
+          }
+          addWrapped(d, len, Math.floor(nt * rate), out);
+          nt += dur + sp.gap;
+        }
+        t = nt + 2 + Math.random() * 4; // 다음 지저귐까지 2~6초 쉼
+      }
+    });
+    copyTail(d, len);
+  }
+
+  // 모닥불: 낮은 웅웅거림 + 타닥거리는 소리
+  function fire(d, rate) {
+    brown(d);
+    for (let i = 0; i < d.length; i++) d[i] *= 0.5;
+    const crackles = Math.floor((d.length / rate) * 12);
+    for (let n = 0; n < crackles; n++) {
+      const start = Math.floor(Math.random() * d.length);
+      const burst = 1 + Math.floor(Math.random() * 4);
+      for (let b = 0; b < burst; b++) {
+        const s = start + Math.floor(Math.random() * 0.08 * rate);
+        const amp = 0.3 + Math.random() * 0.9;
+        const len = Math.floor((0.001 + Math.random() * 0.003) * rate);
+        for (let k = 0; k < len && s + k < d.length; k++) {
+          d[s + k] += (Math.random() * 2 - 1) * amp * (1 - k / len);
+        }
+      }
+    }
+  }
+
   // 빗소리: 높은 대역의 쉬익 소리 + 무작위 빗방울
   function rain(d, rate) {
     pink(d);
@@ -199,17 +354,29 @@
     }
   }
 
-  // gain: 소리마다 체감 크기를 비슷하게 맞추는 보정값 (필터 후 RMS 기준 약 -21dB)
+  // gain: 소리마다 체감 크기를 비슷하게 맞추는 보정값 (필터 후 RMS 기준 약 -21dB).
+  // 풀벌레·새소리처럼 높고 띄엄띄엄한 소리는 RMS보다 크게 들려서 조금 낮게 잡음.
   window.Noise = {
+    groups: [
+      { id: 'baby', name: '아기 재우기' },
+      { id: 'home', name: '생활 소리' },
+      { id: 'nature', name: '자연의 소리' },
+    ],
     sounds: [
-      { id: 'shush', gain: 0.95, name: '쉬~ 쉬~', emoji: '🤫', desc: '엄마 아빠가 내는 쉬~ 소리', seconds: SHUSH_SECONDS, fill: shush, filter: { type: 'bandpass', frequency: 3000, Q: 0.6 } },
-      { id: 'womb', gain: 1.4, name: '엄마 뱃속', emoji: '🤰', desc: '심장 소리와 뱃속 소리', seconds: 10, fill: womb, filter: { type: 'lowpass', frequency: 600 } },
-      { id: 'dryer', gain: 0.77, name: '드라이기', emoji: '💨', desc: '헤어드라이어 소리', seconds: 10, fill: dryer, filter: { type: 'lowpass', frequency: 6000 } },
-      { id: 'vacuum', gain: 0.8, name: '청소기', emoji: '🧹', desc: '윙~ 하는 청소기 소리', seconds: 10, fill: vacuum, filter: { type: 'lowpass', frequency: 7000 } },
-      { id: 'car', gain: 0.9, name: '자동차 안', emoji: '🚗', desc: '차만 타면 자는 아기에게', seconds: 10, fill: car, filter: { type: 'lowpass', frequency: 400 } },
-      { id: 'rain', gain: 2.0, name: '빗소리', emoji: '🌧️', desc: '잔잔하게 내리는 비', seconds: 12, fill: rain, filter: { type: 'highpass', frequency: 400 } },
-      { id: 'fan', gain: 0.83, name: '선풍기', emoji: '🌀', desc: '일정한 바람 소리', seconds: 10, fill: fan, filter: { type: 'lowpass', frequency: 900 } },
-      { id: 'white', gain: 0.56, name: '백색소음', emoji: '☁️', desc: '쏴~ 하는 기본 소리', seconds: 6, fill: white, filter: { type: 'lowpass', frequency: 9000 } },
+      { id: 'shush', group: 'baby', gain: 0.95, name: '쉬~ 쉬~', emoji: '🤫', desc: '엄마 아빠가 내는 쉬~ 소리', seconds: SHUSH_SECONDS, fill: shush, filter: { type: 'bandpass', frequency: 3000, Q: 0.6 } },
+      { id: 'womb', group: 'baby', gain: 1.4, name: '엄마 뱃속', emoji: '🤰', desc: '심장 소리와 뱃속 소리', seconds: 10, fill: womb, filter: { type: 'lowpass', frequency: 600 } },
+      { id: 'white', group: 'baby', gain: 0.56, name: '백색소음', emoji: '☁️', desc: '쏴~ 하는 기본 소리', seconds: 6, fill: white, filter: { type: 'lowpass', frequency: 9000 } },
+      { id: 'dryer', group: 'home', gain: 0.77, name: '드라이기', emoji: '💨', desc: '헤어드라이어 소리', seconds: 10, fill: dryer, filter: { type: 'lowpass', frequency: 6000 } },
+      { id: 'vacuum', group: 'home', gain: 0.8, name: '청소기', emoji: '🧹', desc: '윙~ 하는 청소기 소리', seconds: 10, fill: vacuum, filter: { type: 'lowpass', frequency: 7000 } },
+      { id: 'car', group: 'home', gain: 0.9, name: '자동차 안', emoji: '🚗', desc: '차만 타면 자는 아기에게', seconds: 10, fill: car, filter: { type: 'lowpass', frequency: 400 } },
+      { id: 'fan', group: 'home', gain: 0.83, name: '선풍기', emoji: '🌀', desc: '일정한 바람 소리', seconds: 10, fill: fan, filter: { type: 'lowpass', frequency: 900 } },
+      { id: 'rain', group: 'nature', gain: 2.0, name: '빗소리', emoji: '🌧️', desc: '잔잔하게 내리는 비', seconds: 12, fill: rain, filter: { type: 'highpass', frequency: 400 } },
+      { id: 'ocean', group: 'nature', gain: 1.65, name: '파도', emoji: '🌊', desc: '밀려왔다 밀려가는 바다', seconds: 40, fill: ocean, filter: { type: 'lowpass', frequency: 1800 } },
+      { id: 'stream', group: 'nature', gain: 1.5, name: '시냇물', emoji: '💧', desc: '졸졸 흐르는 물소리', seconds: 12, fill: stream, filter: { type: 'lowpass', frequency: 6000 } },
+      { id: 'wind', group: 'nature', gain: 1.15, name: '바람', emoji: '🍃', desc: '창밖에 부는 바람', seconds: 20, fill: wind, filter: null },
+      { id: 'crickets', group: 'nature', gain: 1.2, name: '풀벌레', emoji: '🦗', desc: '여름밤 귀뚜라미', seconds: 10, fill: crickets, filter: { type: 'highpass', frequency: 200 } },
+      { id: 'birds', group: 'nature', gain: 1.2, name: '새소리', emoji: '🐦', desc: '아침 숲속 지저귐', seconds: 20, fill: birds, filter: { type: 'highpass', frequency: 300 } },
+      { id: 'fire', group: 'nature', gain: 2.5, name: '모닥불', emoji: '🔥', desc: '타닥타닥 장작 타는 소리', seconds: 15, fill: fire, filter: { type: 'lowpass', frequency: 5000 } },
     ],
     makeBuffer(ctx, sound) {
       return makeLoop(ctx, sound.seconds, sound.fill);
