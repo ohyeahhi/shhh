@@ -3,74 +3,98 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#140e0b">
+  <meta name="theme-color" content="#f2f4f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>shhh 아기 재우기</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="app">
     <header class="top">
-      <h1>shhh</h1>
-      <p class="sub">아기 재우기 소리</p>
+      <p class="eyebrow">shhh</p>
+      <h1>어떤 소리로<br>재워볼까요?</h1>
     </header>
 
-    <section class="hero">
-      <button id="play" class="play" aria-pressed="false">
-        <span class="play-label">재우기</span>
-      </button>
-      <p class="now"><span id="now-sound"></span><span id="remaining" class="remaining"></span></p>
+    <section class="card now" id="now-card" aria-live="polite">
+      <span class="now-icon" id="now-emoji"></span>
+      <span class="now-text">
+        <span class="now-name" id="now-name"></span>
+        <span class="now-status" id="now-status"></span>
+      </span>
     </section>
 
-    <section class="block" aria-labelledby="presets-title">
-      <div class="block-head">
+    <section class="group" aria-labelledby="presets-title">
+      <div class="group-head">
         <h2 id="presets-title">우리 아기 설정</h2>
-        <button id="preset-add" class="link">+ 지금 설정 저장</button>
+        <button id="preset-add" class="text-btn">추가</button>
       </div>
-      <form id="preset-form" class="preset-form" hidden>
-        <input id="preset-name" type="text" maxlength="12" placeholder="이름 (예: 할머니댁)" autocomplete="off" required>
-        <button type="submit" id="preset-save" class="chip active">저장</button>
-        <button type="button" id="preset-cancel" class="chip">취소</button>
+      <form id="preset-form" class="card preset-form" hidden>
+        <input id="preset-name" type="text" maxlength="12" placeholder="이름을 입력해 주세요 (예: 할머니댁)" autocomplete="off" required>
+        <div class="preset-form-actions">
+          <button type="button" id="preset-cancel" class="btn btn-gray">취소</button>
+          <button type="submit" id="preset-save" class="btn btn-blue">저장</button>
+        </div>
       </form>
       <div class="chips" id="preset-list"></div>
     </section>
 
-    <section class="block" aria-labelledby="sounds-title">
-      <h2 id="sounds-title">소리 고르기</h2>
-      <div class="sounds" id="sounds"></div>
+    <section class="group" aria-labelledby="sounds-title">
+      <h2 id="sounds-title">소리</h2>
+      <div class="card list" id="sounds"></div>
     </section>
 
-    <section class="block" aria-labelledby="level-title">
-      <h2 id="level-title">소리 크기</h2>
-      <div class="level">
-        <button id="level-down" class="step" aria-label="소리 작게">−</button>
-        <div class="dots" id="level-dots" role="meter" aria-valuemin="1" aria-valuemax="10" aria-labelledby="level-title"></div>
-        <button id="level-up" class="step" aria-label="소리 크게">+</button>
+    <section class="group" aria-labelledby="level-title">
+      <h2 id="level-title">설정</h2>
+      <div class="card">
+        <div class="row-head">
+          <span>소리 크기</span>
+          <span class="value" id="level-value"></span>
+        </div>
+        <div class="level">
+          <button id="level-down" class="step" aria-label="소리 작게">−</button>
+          <div class="meter" role="meter" aria-valuemin="1" aria-valuemax="10" aria-label="소리 크기" id="level-meter">
+            <div class="meter-fill" id="level-fill"></div>
+          </div>
+          <button id="level-up" class="step" aria-label="소리 크게">+</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="row-head">
+          <span>자동으로 끄기</span>
+        </div>
+        <div class="segmented" id="timer-chips" role="radiogroup" aria-label="자동으로 끄기">
+          <button data-min="15" role="radio">15분</button>
+          <button data-min="30" role="radio">30분</button>
+          <button data-min="60" role="radio">1시간</button>
+          <button data-min="0" role="radio">안 끄기</button>
+        </div>
       </div>
     </section>
 
-    <section class="block" aria-labelledby="timer-title">
-      <h2 id="timer-title">자동으로 끄기</h2>
-      <div class="chips" id="timer-chips">
-        <button data-min="15" class="chip">15분</button>
-        <button data-min="30" class="chip">30분</button>
-        <button data-min="60" class="chip">1시간</button>
-        <button data-min="0" class="chip">끄지 않기</button>
-      </div>
-    </section>
-
-    <button id="night-btn" class="night-btn">🌙 화면 어둡게</button>
+    <button id="night-btn" class="card row-btn">
+      <span class="row-icon">🌙</span>
+      <span class="row-text">
+        <span class="row-title">화면 어둡게</span>
+        <span class="row-sub">아기 방을 밝히지 않게 화면을 까맣게 해요</span>
+      </span>
+      <span class="chevron" aria-hidden="true"></span>
+    </button>
 
     <p class="safety">
-      아기 귀를 위해 휴대폰은 아기에게서 <b>2m 이상</b> 떨어뜨리고,
-      휴대폰 볼륨은 <b>절반 이하</b>로 두세요.
+      아기 귀를 위해 휴대폰은 아기에게서 2m 이상 떨어뜨리고,
+      휴대폰 볼륨은 절반 이하로 두세요.
     </p>
   </main>
+
+  <div class="cta-bar">
+    <button id="play" class="cta" aria-pressed="false">재우기</button>
+  </div>
 
   <div id="night" class="night" hidden>
     <p class="night-text">
@@ -81,10 +105,13 @@
   </div>
 
   <template id="sound-tpl">
-    <button class="sound" aria-pressed="false">
-      <span class="emoji"></span>
-      <span class="name"></span>
-      <span class="desc"></span>
+    <button class="sound" role="radio" aria-checked="false">
+      <span class="sound-icon"></span>
+      <span class="sound-text">
+        <span class="name"></span>
+        <span class="desc"></span>
+      </span>
+      <span class="check" aria-hidden="true"></span>
     </button>
   </template>
 

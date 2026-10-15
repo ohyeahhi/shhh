@@ -4,8 +4,8 @@
   "description": "아기를 재우는 쉬~ 소리, 엄마 뱃속 소리, 드라이기 소리",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#140e0b",
-  "theme_color": "#140e0b",
+  "background_color": "#f2f4f6",
+  "theme_color": "#f2f4f6",
   "lang": "ko",
   "icons": [
     {

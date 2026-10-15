@@ -9,15 +9,18 @@
 
   const $ = (sel) => document.querySelector(sel);
   const playBtn = $('#play');
-  const playLabel = playBtn.querySelector('.play-label');
   const soundsEl = $('#sounds');
   const tpl = $('#sound-tpl');
-  const nowSoundEl = $('#now-sound');
-  const remainingEl = $('#remaining');
-  const levelDots = $('#level-dots');
+  const nowCard = $('#now-card');
+  const nowEmoji = $('#now-emoji');
+  const nowName = $('#now-name');
+  const nowStatus = $('#now-status');
+  const levelValue = $('#level-value');
+  const levelFill = $('#level-fill');
+  const levelMeter = $('#level-meter');
   const levelDown = $('#level-down');
   const levelUp = $('#level-up');
-  const timerChips = document.querySelectorAll('#timer-chips .chip');
+  const timerChips = document.querySelectorAll('#timer-chips button');
   const night = $('#night');
   const nightSound = $('#night-sound');
   const nightRemaining = $('#night-remaining');
@@ -330,25 +333,38 @@
     return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
   }
 
+  function statusText() {
+    if (!playing) {
+      return state.timer ? timerLabel(state.timer) + ' 뒤에 꺼지도록 준비했어요' : '끄지 않고 계속 들려줘요';
+    }
+    return timerEnd ? '재우는 중 · ' + formatLeft() + ' 남았어요' : '재우는 중 · 계속 들려줘요';
+  }
+  function timerLabel(min) {
+    return min >= 60 ? min / 60 + '시간' : min + '분';
+  }
+
   function update() {
     const sound = byId[state.sound];
     playBtn.setAttribute('aria-pressed', String(playing));
-    playLabel.textContent = playing ? '그만' : '재우기';
-    nowSoundEl.textContent = (playing ? '재우는 중 · ' : '') + sound.emoji + ' ' + sound.name;
-    remainingEl.textContent = playing ? (timerEnd ? formatLeft() + ' 남음' : '') : '';
+    playBtn.textContent = playing ? '그만하기' : '재우기';
+    nowCard.classList.toggle('playing', playing);
+    nowEmoji.textContent = sound.emoji;
+    nowName.textContent = sound.name;
+    nowStatus.textContent = statusText();
     nightSound.textContent = sound.name;
-    nightRemaining.textContent = timerEnd ? formatLeft() + ' 남음' : '계속 재생 중';
+    nightRemaining.textContent = timerEnd ? formatLeft() + ' 남았어요' : '계속 들려주는 중';
 
     soundsEl.querySelectorAll('.sound').forEach((el) => {
-      el.setAttribute('aria-pressed', String(el.dataset.id === state.sound));
+      el.setAttribute('aria-checked', String(el.dataset.id === state.sound));
     });
 
-    levelDots.querySelectorAll('span').forEach((d, i) => d.classList.toggle('on', i < state.level));
-    levelDots.setAttribute('aria-valuenow', state.level);
+    levelValue.textContent = state.level + ' / ' + MAX_LEVEL;
+    levelFill.style.width = (state.level / MAX_LEVEL) * 100 + '%';
+    levelMeter.setAttribute('aria-valuenow', state.level);
     levelDown.disabled = state.level <= 1;
     levelUp.disabled = state.level >= MAX_LEVEL;
 
-    timerChips.forEach((c) => c.classList.toggle('active', Number(c.dataset.min) === state.timer));
+    timerChips.forEach((c) => c.setAttribute('aria-checked', String(Number(c.dataset.min) === state.timer)));
 
     renderPresets();
     if ('mediaSession' in navigator) {
@@ -360,9 +376,8 @@
     if (!playing || !timerEnd) return;
     if (Date.now() >= timerEnd) stop();
     else {
-      const t = formatLeft() + ' 남음';
-      remainingEl.textContent = t;
-      nightRemaining.textContent = t;
+      nowStatus.textContent = statusText();
+      nightRemaining.textContent = formatLeft() + ' 남았어요';
     }
   }, 1000);
 
@@ -370,18 +385,12 @@
   Noise.sounds.forEach((s) => {
     const el = tpl.content.firstElementChild.cloneNode(true);
     el.dataset.id = s.id;
-    el.querySelector('.emoji').textContent = s.emoji;
+    el.querySelector('.sound-icon').textContent = s.emoji;
     el.querySelector('.name').textContent = s.name;
     el.querySelector('.desc').textContent = s.desc;
     el.addEventListener('click', () => selectSound(s.id));
     soundsEl.appendChild(el);
   });
-  // 볼륨 막대: 오른쪽으로 갈수록 높아짐
-  for (let i = 0; i < MAX_LEVEL; i++) {
-    const d = document.createElement('span');
-    d.style.height = 30 + (i * 70) / (MAX_LEVEL - 1) + '%';
-    levelDots.appendChild(d);
-  }
 
   playBtn.addEventListener('click', () => (playing ? stop() : play()));
   levelDown.addEventListener('click', () => setLevel(state.level - 1));
