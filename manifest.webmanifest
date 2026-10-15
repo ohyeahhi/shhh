@@ -1,0 +1,13 @@
+{
+  "name": "shhh · 백색소음",
+  "short_name": "shhh",
+  "description": "소리를 섞어 만드는 백색소음 앱",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f1420",
+  "theme_color": "#0f1420",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

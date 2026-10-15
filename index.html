@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1420">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>shhh · 백색소음</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <h1>shhh</h1>
+      <p class="sub">소리를 섞어 나만의 백색소음을 만드세요</p>
+    </header>
+
+    <section class="hero">
+      <button id="play" class="play" aria-label="재생" aria-pressed="false">
+        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </button>
+      <div class="master">
+        <label for="master">전체 볼륨</label>
+        <input id="master" type="range" min="0" max="100" value="70">
+      </div>
+    </section>
+
+    <section class="timer" aria-label="타이머">
+      <div class="timer-head">
+        <span>꺼짐 타이머</span>
+        <span id="remaining" class="remaining"></span>
+      </div>
+      <div class="chips" id="timer-chips">
+        <button data-min="0" class="chip active">끔</button>
+        <button data-min="15" class="chip">15분</button>
+        <button data-min="30" class="chip">30분</button>
+        <button data-min="60" class="chip">1시간</button>
+        <button data-min="120" class="chip">2시간</button>
+      </div>
+    </section>
+
+    <section class="sounds" id="sounds" aria-label="소리 목록"></section>
+
+    <footer class="foot">헤드폰 사용 시 볼륨을 너무 높이지 마세요.</footer>
+  </main>
+
+  <template id="sound-tpl">
+    <div class="sound">
+      <button class="toggle" aria-pressed="false">
+        <span class="emoji"></span>
+        <span class="name"></span>
+      </button>
+      <input class="vol" type="range" min="0" max="100" value="60" aria-label="">
+    </div>
+  </template>
+
+  <script src="noise.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
