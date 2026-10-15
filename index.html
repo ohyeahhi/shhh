@@ -44,6 +44,19 @@
       </div>
     </section>
 
+    <section class="presets" aria-label="프리셋">
+      <div class="presets-head">
+        <span>프리셋</span>
+        <button id="preset-add" class="link">+ 현재 조합 저장</button>
+      </div>
+      <form id="preset-form" class="preset-form" hidden>
+        <input id="preset-name" type="text" maxlength="20" placeholder="프리셋 이름" autocomplete="off" required>
+        <button type="submit" id="preset-save" class="chip active">저장</button>
+        <button type="button" id="preset-cancel" class="chip">취소</button>
+      </form>
+      <div class="chips" id="preset-list"></div>
+    </section>
+
     <section class="sounds" id="sounds" aria-label="소리 목록"></section>
 
     <footer class="foot">헤드폰 사용 시 볼륨을 너무 높이지 마세요.</footer>
