@@ -1,5 +1,5 @@
 // 오프라인에서도 앱이 열리도록 정적 파일을 캐시합니다.
-const CACHE = 'shhh-v6';
+const CACHE = 'shhh-v7';
 const FILES = ['./', 'index.html', 'style.css', 'noise.js', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
