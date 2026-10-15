@@ -3,73 +3,89 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1420">
+  <meta name="theme-color" content="#140e0b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>shhh · 백색소음</title>
+  <title>shhh 아기 재우기</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="app">
     <header class="top">
       <h1>shhh</h1>
-      <p class="sub">소리를 섞어 나만의 백색소음을 만드세요</p>
+      <p class="sub">아기 재우기 소리</p>
     </header>
 
     <section class="hero">
-      <button id="play" class="play" aria-label="재생" aria-pressed="false">
-        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-        <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      <button id="play" class="play" aria-pressed="false">
+        <span class="play-label">재우기</span>
       </button>
-      <div class="master">
-        <label for="master">전체 볼륨</label>
-        <input id="master" type="range" min="0" max="100" value="70">
-      </div>
+      <p class="now"><span id="now-sound"></span><span id="remaining" class="remaining"></span></p>
     </section>
 
-    <section class="timer" aria-label="타이머">
-      <div class="timer-head">
-        <span>꺼짐 타이머</span>
-        <span id="remaining" class="remaining"></span>
-      </div>
-      <div class="chips" id="timer-chips">
-        <button data-min="0" class="chip active">끔</button>
-        <button data-min="15" class="chip">15분</button>
-        <button data-min="30" class="chip">30분</button>
-        <button data-min="60" class="chip">1시간</button>
-        <button data-min="120" class="chip">2시간</button>
-      </div>
-    </section>
-
-    <section class="presets" aria-label="프리셋">
-      <div class="presets-head">
-        <span>프리셋</span>
-        <button id="preset-add" class="link">+ 현재 조합 저장</button>
+    <section class="block" aria-labelledby="presets-title">
+      <div class="block-head">
+        <h2 id="presets-title">우리 아기 설정</h2>
+        <button id="preset-add" class="link">+ 지금 설정 저장</button>
       </div>
       <form id="preset-form" class="preset-form" hidden>
-        <input id="preset-name" type="text" maxlength="20" placeholder="프리셋 이름" autocomplete="off" required>
+        <input id="preset-name" type="text" maxlength="12" placeholder="이름 (예: 할머니댁)" autocomplete="off" required>
         <button type="submit" id="preset-save" class="chip active">저장</button>
         <button type="button" id="preset-cancel" class="chip">취소</button>
       </form>
       <div class="chips" id="preset-list"></div>
     </section>
 
-    <section class="sounds" id="sounds" aria-label="소리 목록"></section>
+    <section class="block" aria-labelledby="sounds-title">
+      <h2 id="sounds-title">소리 고르기</h2>
+      <div class="sounds" id="sounds"></div>
+    </section>
 
-    <footer class="foot">헤드폰 사용 시 볼륨을 너무 높이지 마세요.</footer>
+    <section class="block" aria-labelledby="level-title">
+      <h2 id="level-title">소리 크기</h2>
+      <div class="level">
+        <button id="level-down" class="step" aria-label="소리 작게">−</button>
+        <div class="dots" id="level-dots" role="meter" aria-valuemin="1" aria-valuemax="10" aria-labelledby="level-title"></div>
+        <button id="level-up" class="step" aria-label="소리 크게">+</button>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="timer-title">
+      <h2 id="timer-title">자동으로 끄기</h2>
+      <div class="chips" id="timer-chips">
+        <button data-min="15" class="chip">15분</button>
+        <button data-min="30" class="chip">30분</button>
+        <button data-min="60" class="chip">1시간</button>
+        <button data-min="0" class="chip">끄지 않기</button>
+      </div>
+    </section>
+
+    <button id="night-btn" class="night-btn">🌙 화면 어둡게</button>
+
+    <p class="safety">
+      아기 귀를 위해 휴대폰은 아기에게서 <b>2m 이상</b> 떨어뜨리고,
+      휴대폰 볼륨은 <b>절반 이하</b>로 두세요.
+    </p>
   </main>
 
+  <div id="night" class="night" hidden>
+    <p class="night-text">
+      <span id="night-sound"></span>
+      <span id="night-remaining"></span>
+      <span class="night-hint">화면을 누르면 돌아와요</span>
+    </p>
+  </div>
+
   <template id="sound-tpl">
-    <div class="sound">
-      <button class="toggle" aria-pressed="false">
-        <span class="emoji"></span>
-        <span class="name"></span>
-      </button>
-      <input class="vol" type="range" min="0" max="100" value="60" aria-label="">
-    </div>
+    <button class="sound" aria-pressed="false">
+      <span class="emoji"></span>
+      <span class="name"></span>
+      <span class="desc"></span>
+    </button>
   </template>
 
   <script src="noise.js"></script>

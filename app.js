@@ -1,54 +1,59 @@
 (function () {
   'use strict';
 
-  const STORE_KEY = 'shhh:v1';
-  const FADE = 1.2; // 재생/정지 시 페이드 시간(초)
-  const TIMER_FADE = 20; // 타이머 종료 직전 페이드아웃 시간(초)
+  const STORE_KEY = 'shhh:baby:v1';
+  const FADE = 1.5; // 재생/정지/소리 바꿀 때 페이드 시간(초)
+  const TIMER_FADE = 30; // 자동 끄기 직전 서서히 줄어드는 시간(초)
+  const NIGHT_IDLE = 20; // 재생 중 이 시간(초) 동안 손대지 않으면 화면 어둡게
+  const MAX_LEVEL = 10;
 
   const $ = (sel) => document.querySelector(sel);
   const playBtn = $('#play');
-  const masterInput = $('#master');
+  const playLabel = playBtn.querySelector('.play-label');
   const soundsEl = $('#sounds');
   const tpl = $('#sound-tpl');
+  const nowSoundEl = $('#now-sound');
   const remainingEl = $('#remaining');
-  const chips = document.querySelectorAll('#timer-chips .chip');
+  const levelDots = $('#level-dots');
+  const levelDown = $('#level-down');
+  const levelUp = $('#level-up');
+  const timerChips = document.querySelectorAll('#timer-chips .chip');
+  const night = $('#night');
+  const nightSound = $('#night-sound');
+  const nightRemaining = $('#night-remaining');
   const presetList = $('#preset-list');
   const presetForm = $('#preset-form');
   const presetName = $('#preset-name');
   const presetSave = $('#preset-save');
 
-  // 기본 제공 프리셋 (삭제 불가). mix: 소리 id -> 볼륨
+  // 기본 제공 설정 (삭제 불가)
   const BUILTIN_PRESETS = [
-    { id: 'b-rain', name: '비 오는 밤', mix: { rain: 60, deep: 35 } },
-    { id: 'b-sea', name: '바닷가', mix: { ocean: 70, pink: 20 } },
-    { id: 'b-focus', name: '집중', mix: { brown: 55, fan: 30 } },
-    { id: 'b-camp', name: '캠핑', mix: { fire: 65, rain: 25 } },
+    { id: 'b-nap', name: '낮잠', sound: 'shush', level: 5, timer: 30 },
+    { id: 'b-night', name: '밤잠', sound: 'womb', level: 4, timer: 0 },
   ];
 
-  const state = load() || {
-    master: 70,
-    sounds: { rain: { on: true, vol: 60 } },
-  };
+  const byId = {};
+  Noise.sounds.forEach((s) => { byId[s.id] = s; });
+
+  const state = Object.assign({ sound: 'shush', level: 5, timer: 30, presets: [] }, load());
+  if (!byId[state.sound]) state.sound = 'shush';
   if (!Array.isArray(state.presets)) state.presets = [];
 
   let ctx = null;
   let masterGain = null;
   let playing = false;
-  const nodes = {}; // id -> { gain, source }
+  let current = null; // { id, source, gain }
   const buffers = {};
-
   let timerEnd = 0;
-  let timerId = null;
+  let wakeLock = null;
+  let idleTimer = null;
 
   // ---------- 저장 ----------
   function load() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch (_) { return null; }
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (_) { return {}; }
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
-  }
-  function soundState(id) {
-    return state.sounds[id] || (state.sounds[id] = { on: false, vol: 60 });
   }
 
   // ---------- 오디오 ----------
@@ -65,8 +70,8 @@
     masterGain.connect(ctx.destination);
   }
 
-  // 슬라이더 값(0..100)을 사람 귀에 자연스러운 곡선으로 변환
-  function curve(v) { return Math.pow(v / 100, 2); }
+  // 단계(1..10)를 귀에 자연스러운 곡선으로 변환. 최대치도 넉넉히 낮게 잡음.
+  function levelGain(level) { return 0.85 * Math.pow(level / MAX_LEVEL, 2); }
 
   function ramp(param, value, seconds) {
     const now = ctx.currentTime;
@@ -75,12 +80,12 @@
     param.linearRampToValueAtTime(value, now + seconds);
   }
 
-  function startSound(sound) {
-    if (nodes[sound.id]) return;
-    if (!buffers[sound.id]) buffers[sound.id] = Noise.makeBuffer(ctx, sound);
+  function startSound(id) {
+    const sound = byId[id];
+    if (!buffers[id]) buffers[id] = Noise.makeBuffer(ctx, sound);
 
     const source = ctx.createBufferSource();
-    source.buffer = buffers[sound.id];
+    source.buffer = buffers[id];
     source.loop = true;
 
     const gain = ctx.createGain();
@@ -91,160 +96,167 @@
       const f = ctx.createBiquadFilter();
       f.type = sound.filter.type;
       f.frequency.value = sound.filter.frequency;
+      if (sound.filter.Q) f.Q.value = sound.filter.Q;
       source.connect(f);
       head = f;
     }
     head.connect(gain);
     gain.connect(masterGain);
-    // 같은 소리를 여러 번 켜도 똑같이 들리지 않도록 시작 위치를 무작위로
-    source.start(0, Math.random() * source.buffer.duration);
-
-    nodes[sound.id] = { source, gain };
-    ramp(gain.gain, curve(soundState(sound.id).vol), FADE);
+    source.start();
+    ramp(gain.gain, sound.gain || 1, FADE);
+    current = { id, source, gain };
   }
 
-  function stopSound(id) {
-    const n = nodes[id];
-    if (!n) return;
-    delete nodes[id];
-    ramp(n.gain.gain, 0, FADE);
-    n.source.stop(ctx.currentTime + FADE + 0.05);
-  }
-
-  function anyOn() {
-    return Noise.sounds.some((s) => soundState(s.id).on);
+  function stopCurrent() {
+    if (!current) return;
+    const { source, gain } = current;
+    current = null;
+    ramp(gain.gain, 0, FADE);
+    source.stop(ctx.currentTime + FADE + 0.05);
   }
 
   async function play() {
     ensureContext();
-    if (!anyOn()) {
-      soundState('pink').on = true;
-      render();
-    }
     await ctx.resume();
-    Noise.sounds.forEach((s) => { if (soundState(s.id).on) startSound(s); });
-    ramp(masterGain.gain, curve(state.master), FADE);
+    if (!current || current.id !== state.sound) {
+      stopCurrent();
+      startSound(state.sound);
+    }
     playing = true;
-    if (timerEnd) scheduleTimerFade();
-    updatePlayUI();
-    save();
+    timerEnd = state.timer ? Date.now() + state.timer * 60 * 1000 : 0;
+    applyMaster();
+    requestWakeLock();
+    resetIdle();
+    update();
   }
 
-  function pause() {
-    if (!ctx) return;
+  function stop() {
+    if (!playing) return;
     playing = false;
+    timerEnd = 0;
     ramp(masterGain.gain, 0, FADE);
-    const wasCtx = ctx;
     setTimeout(() => {
       if (!playing) {
-        Object.keys(nodes).forEach((id) => {
-          nodes[id].source.stop();
-          delete nodes[id];
-        });
-        wasCtx.suspend();
+        if (current) { current.source.stop(); current = null; }
+        ctx.suspend();
       }
     }, FADE * 1000 + 100);
-    updatePlayUI();
+    releaseWakeLock();
+    hideNight();
+    update();
   }
 
-  // ---------- 타이머 ----------
-  function setTimer(min) {
-    clearInterval(timerId);
-    timerId = null;
-    timerEnd = min ? Date.now() + min * 60 * 1000 : 0;
-    chips.forEach((c) => c.classList.toggle('active', Number(c.dataset.min) === min));
-    if (timerEnd) {
-      timerId = setInterval(tick, 1000);
-      if (playing) scheduleTimerFade();
-    } else if (playing) {
-      ramp(masterGain.gain, curve(state.master), FADE);
-    }
-    tick();
-  }
-
-  function scheduleTimerFade() {
-    const left = (timerEnd - Date.now()) / 1000;
-    if (left <= 0) return;
-    const now = ctx.currentTime;
+  // 전체 볼륨 적용 + 자동 끄기 직전 페이드아웃 예약
+  function applyMaster() {
+    if (!playing) return;
     const g = masterGain.gain;
-    const level = curve(state.master);
+    const level = levelGain(state.level);
+    const now = ctx.currentTime;
     g.cancelScheduledValues(now);
     g.setValueAtTime(g.value, now);
+    if (!timerEnd) {
+      g.linearRampToValueAtTime(level, now + FADE);
+      return;
+    }
+    const left = (timerEnd - Date.now()) / 1000;
     if (left > TIMER_FADE) {
       g.linearRampToValueAtTime(level, now + Math.min(FADE, left - TIMER_FADE));
       g.setValueAtTime(level, now + left - TIMER_FADE);
     }
-    g.linearRampToValueAtTime(0, now + left);
+    g.linearRampToValueAtTime(0, now + Math.max(left, 0.1));
   }
 
-  function tick() {
-    if (!timerEnd) {
-      remainingEl.textContent = '';
-      return;
+  function selectSound(id) {
+    state.sound = id;
+    if (playing) {
+      if (!current || current.id !== id) {
+        stopCurrent();
+        startSound(id);
+      }
+    } else {
+      play();
     }
-    const left = Math.max(0, Math.round((timerEnd - Date.now()) / 1000));
-    const h = Math.floor(left / 3600);
-    const m = Math.floor((left % 3600) / 60);
-    const s = left % 60;
-    remainingEl.textContent = (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
-    if (left === 0) {
-      pause();
-      setTimer(0);
-    }
+    save();
+    update();
   }
+
+  function setLevel(level) {
+    state.level = Math.max(1, Math.min(MAX_LEVEL, level));
+    applyMaster();
+    save();
+    update();
+  }
+
+  function setTimer(min) {
+    state.timer = min;
+    if (playing) {
+      timerEnd = min ? Date.now() + min * 60 * 1000 : 0;
+      applyMaster();
+    }
+    save();
+    update();
+  }
+
+  // ---------- 화면 켜둠 / 어둡게 ----------
+  // 화면이 꺼지면 브라우저가 소리를 멈출 수 있어서, 재생 중에는 화면을 켜두고
+  // 대신 검은 화면으로 덮어 빛을 최소로 줄입니다.
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (_) {}
+  }
+  function releaseWakeLock() {
+    if (wakeLock) wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && playing) requestWakeLock();
+  });
+
+  function showNight() {
+    night.hidden = false;
+    update();
+  }
+  function hideNight() {
+    night.hidden = true;
+  }
+  function resetIdle() {
+    clearTimeout(idleTimer);
+    if (playing) idleTimer = setTimeout(showNight, NIGHT_IDLE * 1000);
+  }
+  ['pointerdown', 'keydown'].forEach((type) => document.addEventListener(type, resetIdle));
+  night.addEventListener('click', hideNight);
 
   // ---------- 프리셋 ----------
-  function currentMix() {
-    const mix = {};
-    Noise.sounds.forEach((s) => {
-      const st = soundState(s.id);
-      if (st.on) mix[s.id] = st.vol;
-    });
-    return mix;
+  function matches(p) {
+    return p.sound === state.sound && p.level === state.level && p.timer === state.timer;
   }
 
-  function sameMix(a, b) {
-    const ka = Object.keys(a);
-    return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
-  }
-
-  function applyPreset(preset) {
-    Noise.sounds.forEach((s) => {
-      const st = soundState(s.id);
-      const vol = preset.mix[s.id];
-      st.on = vol != null;
-      if (st.on) st.vol = vol;
-      if (!playing) return;
-      if (!st.on) stopSound(s.id);
-      else if (nodes[s.id]) ramp(nodes[s.id].gain.gain, curve(st.vol), FADE);
-      else startSound(s);
-    });
-    if (!playing) play();
-    render();
+  function applyPreset(p) {
+    state.level = p.level;
+    state.timer = p.timer;
+    state.sound = p.sound;
+    if (playing) {
+      if (!current || current.id !== p.sound) {
+        stopCurrent();
+        startSound(p.sound);
+      }
+      timerEnd = p.timer ? Date.now() + p.timer * 60 * 1000 : 0;
+      applyMaster();
+    } else {
+      play();
+    }
     save();
-  }
-
-  function savePreset(name) {
-    const mix = currentMix();
-    const existing = state.presets.find((p) => p.name === name);
-    if (existing) existing.mix = mix;
-    else state.presets.push({ id: 'u-' + Date.now(), name, mix });
-    save();
-    renderPresets();
-  }
-
-  function deletePreset(id) {
-    state.presets = state.presets.filter((p) => p.id !== id);
-    save();
-    renderPresets();
+    update();
   }
 
   function renderPresets() {
-    const mix = currentMix();
     presetList.textContent = '';
     BUILTIN_PRESETS.concat(state.presets).forEach((p) => {
       const el = document.createElement('div');
-      el.className = 'preset' + (sameMix(p.mix, mix) ? ' active' : '');
+      el.className = 'preset' + (matches(p) ? ' active' : '');
 
       const apply = document.createElement('button');
       apply.className = 'apply';
@@ -259,7 +271,12 @@
         del.setAttribute('aria-label', p.name + ' 삭제');
         // 한 번 누르면 '삭제' 확인 상태, 다시 누르면 삭제
         del.addEventListener('click', () => {
-          if (el.classList.contains('confirm')) return deletePreset(p.id);
+          if (el.classList.contains('confirm')) {
+            state.presets = state.presets.filter((x) => x.id !== p.id);
+            save();
+            renderPresets();
+            return;
+          }
           el.classList.add('confirm');
           del.textContent = '삭제';
           setTimeout(() => {
@@ -278,120 +295,108 @@
     presetName.value = '';
     updateSaveLabel();
   }
-
   // 같은 이름이 있으면 버튼이 '덮어쓰기'로 바뀜
   function updateSaveLabel() {
     const name = presetName.value.trim();
     presetSave.textContent = state.presets.some((p) => p.name === name) ? '덮어쓰기' : '저장';
   }
   presetName.addEventListener('input', updateSaveLabel);
-
+  presetName.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePresetForm(); });
   $('#preset-add').addEventListener('click', () => {
-    if (!anyOn()) {
-      presetName.placeholder = '먼저 소리를 하나 이상 켜세요';
-    } else {
-      presetName.placeholder = '프리셋 이름';
-    }
     presetForm.hidden = false;
     presetName.focus();
   });
   $('#preset-cancel').addEventListener('click', closePresetForm);
-  presetName.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePresetForm(); });
   presetForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const name = presetName.value.trim();
-    if (!name || !anyOn()) return;
-    savePreset(name);
+    if (!name) return;
+    const setting = { sound: state.sound, level: state.level, timer: state.timer };
+    const existing = state.presets.find((p) => p.name === name);
+    if (existing) Object.assign(existing, setting);
+    else state.presets.push(Object.assign({ id: 'u-' + Date.now(), name }, setting));
+    save();
     closePresetForm();
+    renderPresets();
   });
 
-  // ---------- UI ----------
-  function updatePlayUI() {
+  // ---------- 화면 갱신 ----------
+  function formatLeft() {
+    if (!timerEnd) return '';
+    const left = Math.max(0, Math.round((timerEnd - Date.now()) / 1000));
+    const h = Math.floor(left / 3600);
+    const m = Math.floor((left % 3600) / 60);
+    const s = left % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+  }
+
+  function update() {
+    const sound = byId[state.sound];
     playBtn.setAttribute('aria-pressed', String(playing));
-    playBtn.setAttribute('aria-label', playing ? '일시정지' : '재생');
+    playLabel.textContent = playing ? '그만' : '재우기';
+    nowSoundEl.textContent = (playing ? '재우는 중 · ' : '') + sound.emoji + ' ' + sound.name;
+    remainingEl.textContent = playing ? (timerEnd ? formatLeft() + ' 남음' : '') : '';
+    nightSound.textContent = sound.name;
+    nightRemaining.textContent = timerEnd ? formatLeft() + ' 남음' : '계속 재생 중';
+
+    soundsEl.querySelectorAll('.sound').forEach((el) => {
+      el.setAttribute('aria-pressed', String(el.dataset.id === state.sound));
+    });
+
+    levelDots.querySelectorAll('span').forEach((d, i) => d.classList.toggle('on', i < state.level));
+    levelDots.setAttribute('aria-valuenow', state.level);
+    levelDown.disabled = state.level <= 1;
+    levelUp.disabled = state.level >= MAX_LEVEL;
+
+    timerChips.forEach((c) => c.classList.toggle('active', Number(c.dataset.min) === state.timer));
+
+    renderPresets();
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
     }
   }
 
-  function render() {
-    Noise.sounds.forEach((s) => {
-      const el = soundsEl.querySelector('[data-id="' + s.id + '"]');
-      const st = soundState(s.id);
-      el.classList.toggle('on', st.on);
-      el.querySelector('.toggle').setAttribute('aria-pressed', String(st.on));
-      el.querySelector('.vol').value = st.vol;
-    });
-    renderPresets();
-  }
-
-  function build() {
-    Noise.sounds.forEach((s) => {
-      const el = tpl.content.firstElementChild.cloneNode(true);
-      el.dataset.id = s.id;
-      el.querySelector('.emoji').textContent = s.emoji;
-      el.querySelector('.name').textContent = s.name;
-      const vol = el.querySelector('.vol');
-      vol.setAttribute('aria-label', s.name + ' 볼륨');
-
-      el.querySelector('.toggle').addEventListener('click', () => {
-        const st = soundState(s.id);
-        st.on = !st.on;
-        if (playing) {
-          if (st.on) startSound(s); else stopSound(s.id);
-          if (!anyOn()) pause();
-        } else if (st.on) {
-          play();
-        }
-        render();
-        save();
-      });
-
-      vol.addEventListener('input', () => {
-        const st = soundState(s.id);
-        st.vol = Number(vol.value);
-        if (!st.on) {
-          st.on = true;
-          if (playing) startSound(s); else play();
-          render();
-        } else if (nodes[s.id]) {
-          ramp(nodes[s.id].gain.gain, curve(st.vol), 0.05);
-        }
-        renderPresets();
-        save();
-      });
-
-      soundsEl.appendChild(el);
-    });
-    render();
-  }
-
-  playBtn.addEventListener('click', () => (playing ? pause() : play()));
-
-  masterInput.value = state.master;
-  masterInput.addEventListener('input', () => {
-    state.master = Number(masterInput.value);
-    if (playing) {
-      ramp(masterGain.gain, curve(state.master), 0.05);
-      if (timerEnd) scheduleTimerFade();
+  setInterval(() => {
+    if (!playing || !timerEnd) return;
+    if (Date.now() >= timerEnd) stop();
+    else {
+      const t = formatLeft() + ' 남음';
+      remainingEl.textContent = t;
+      nightRemaining.textContent = t;
     }
-    save();
+  }, 1000);
+
+  // ---------- 화면 만들기 ----------
+  Noise.sounds.forEach((s) => {
+    const el = tpl.content.firstElementChild.cloneNode(true);
+    el.dataset.id = s.id;
+    el.querySelector('.emoji').textContent = s.emoji;
+    el.querySelector('.name').textContent = s.name;
+    el.querySelector('.desc').textContent = s.desc;
+    el.addEventListener('click', () => selectSound(s.id));
+    soundsEl.appendChild(el);
   });
+  // 볼륨 막대: 오른쪽으로 갈수록 높아짐
+  for (let i = 0; i < MAX_LEVEL; i++) {
+    const d = document.createElement('span');
+    d.style.height = 30 + (i * 70) / (MAX_LEVEL - 1) + '%';
+    levelDots.appendChild(d);
+  }
 
-  chips.forEach((c) => c.addEventListener('click', () => setTimer(Number(c.dataset.min))));
-
-  document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && e.target === document.body) {
-      e.preventDefault();
-      playing ? pause() : play();
-    }
+  playBtn.addEventListener('click', () => (playing ? stop() : play()));
+  levelDown.addEventListener('click', () => setLevel(state.level - 1));
+  levelUp.addEventListener('click', () => setLevel(state.level + 1));
+  timerChips.forEach((c) => c.addEventListener('click', () => setTimer(Number(c.dataset.min))));
+  $('#night-btn').addEventListener('click', () => {
+    if (!playing) play();
+    showNight();
   });
 
   if ('mediaSession' in navigator) {
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: '백색소음', artist: 'shhh' });
+      navigator.mediaSession.metadata = new MediaMetadata({ title: '아기 재우기', artist: 'shhh' });
       navigator.mediaSession.setActionHandler('play', play);
-      navigator.mediaSession.setActionHandler('pause', pause);
+      navigator.mediaSession.setActionHandler('pause', stop);
     } catch (_) {}
   }
 
@@ -399,5 +404,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  build();
+  update();
 })();

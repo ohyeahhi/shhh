@@ -1,13 +1,18 @@
 {
-  "name": "shhh · 백색소음",
+  "name": "shhh 아기 재우기",
   "short_name": "shhh",
-  "description": "소리를 섞어 만드는 백색소음 앱",
+  "description": "아기를 재우는 쉬~ 소리, 엄마 뱃속 소리, 드라이기 소리",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0f1420",
-  "theme_color": "#0f1420",
+  "background_color": "#140e0b",
+  "theme_color": "#140e0b",
   "lang": "ko",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }
