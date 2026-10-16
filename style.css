@@ -148,24 +148,69 @@ h2 {
 .now-name { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
 
 /* 겹친 소리 목록: 소리마다 크기 조절과 빼기 */
-.mix { display: flex; flex-direction: column; gap: 4px; padding-top: 14px; border-top: 1px solid var(--fill); }
-.mix-row { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.mix { display: flex; flex-direction: column; gap: 14px; padding-top: 16px; border-top: 1px solid var(--fill); }
+.mix-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--sub); }
+.mix-row { display: flex; flex-direction: column; gap: 4px; }
+.mix-top { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .mix-icon { flex: none; width: 28px; font-size: 20px; text-align: center; }
-.mix-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mix-name { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mix-value { flex: none; font-size: 15px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+.mix-control { display: flex; align-items: center; gap: 10px; }
 .mini-step {
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: 50%;
   background: var(--fill);
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
+  transition: transform 0.1s, background 0.15s;
 }
-.mini-step:active { background: var(--fill-strong); }
+.mini-step:active { transform: scale(0.92); background: var(--fill-strong); }
 .mini-step:disabled { opacity: 0.35; }
-.mini-meter { flex: none; width: 56px; height: 6px; border-radius: 999px; background: var(--fill); overflow: hidden; }
-.mini-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.2s; }
+
+/* 손가락으로 끄는 크기 슬라이더 (애플식 흰 손잡이) */
+.mix-range {
+  --p: 70%;
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: none;
+  cursor: pointer;
+}
+.mix-range::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) 0 var(--p), var(--fill) var(--p) 100%);
+}
+.mix-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -10px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+.mix-range::-moz-range-track { height: 8px; border-radius: 999px; background: var(--fill); }
+.mix-range::-moz-range-progress { height: 8px; border-radius: 999px; background: var(--accent); }
+.mix-range::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.mix-range:focus-visible { outline: none; }
+.mix-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent); }
+
 .mix-remove {
   flex: none;
   position: relative;

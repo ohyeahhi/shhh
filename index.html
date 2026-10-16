@@ -124,12 +124,17 @@
 
   <template id="mix-tpl">
     <div class="mix-row">
-      <span class="mix-icon"></span>
-      <span class="mix-name"></span>
-      <button class="mini-step mix-down">−</button>
-      <span class="mini-meter"><span class="mini-fill"></span></span>
-      <button class="mini-step mix-up">+</button>
-      <button class="mix-remove"></button>
+      <div class="mix-top">
+        <span class="mix-icon"></span>
+        <span class="mix-name"></span>
+        <span class="mix-value"></span>
+        <button class="mix-remove"></button>
+      </div>
+      <div class="mix-control">
+        <button class="mini-step mix-down">−</button>
+        <input class="mix-range" type="range" min="1" max="10" step="1">
+        <button class="mini-step mix-up">+</button>
+      </div>
     </div>
   </template>
 

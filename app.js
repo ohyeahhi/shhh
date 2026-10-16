@@ -256,13 +256,15 @@
     layersChanged();
   }
 
-  function setLayerLevel(id, delta) {
+  // 겹친 소리 하나의 크기 설정. 슬라이더를 끄는 중에는 목록을 다시 그리지 않도록
+  // redraw=false로 불러서 손가락이 놓치지 않게 함.
+  function setLayerLevel(id, level, redraw) {
     const l = findLayer(id);
     if (!l) return;
-    l.level = Math.max(1, Math.min(MAX_LEVEL, l.level + delta));
+    l.level = Math.max(1, Math.min(MAX_LEVEL, level));
     syncAudio(0.1);
     save();
-    update();
+    if (redraw !== false) update();
   }
 
   function setLevel(level) {
@@ -443,20 +445,38 @@
     mixEl.textContent = '';
     mixEl.hidden = state.layers.length < 2;
     if (mixEl.hidden) return;
+    const title = document.createElement('p');
+    title.className = 'mix-title';
+    title.textContent = '소리별 크기';
+    mixEl.appendChild(title);
     state.layers.forEach((l) => {
       const s = byId[l.id];
       const row = mixTpl.content.firstElementChild.cloneNode(true);
       row.querySelector('.mix-icon').textContent = s.emoji;
       row.querySelector('.mix-name').textContent = s.name;
-      row.querySelector('.mini-fill').style.width = (l.level / MAX_LEVEL) * 100 + '%';
+      const value = row.querySelector('.mix-value');
+      const range = row.querySelector('.mix-range');
       const down = row.querySelector('.mix-down');
       const up = row.querySelector('.mix-up');
+      // 슬라이더·숫자·버튼 상태를 한 번에 맞춤
+      const show = () => {
+        value.textContent = l.level;
+        range.value = l.level;
+        range.style.setProperty('--p', ((l.level - 1) / (MAX_LEVEL - 1)) * 100 + '%');
+        down.disabled = l.level <= 1;
+        up.disabled = l.level >= MAX_LEVEL;
+      };
+      show();
+      range.setAttribute('aria-label', s.name + ' 크기');
       down.setAttribute('aria-label', s.name + ' 작게');
       up.setAttribute('aria-label', s.name + ' 크게');
-      down.disabled = l.level <= 1;
-      up.disabled = l.level >= MAX_LEVEL;
-      down.addEventListener('click', () => setLayerLevel(l.id, -1));
-      up.addEventListener('click', () => setLayerLevel(l.id, 1));
+      range.addEventListener('input', () => {
+        setLayerLevel(l.id, Number(range.value), false);
+        show();
+      });
+      range.addEventListener('change', () => renderPresets());
+      down.addEventListener('click', () => setLayerLevel(l.id, l.level - 1));
+      up.addEventListener('click', () => setLayerLevel(l.id, l.level + 1));
       const remove = row.querySelector('.mix-remove');
       remove.setAttribute('aria-label', s.name + ' 빼기');
       remove.addEventListener('click', () => toggleLayer(l.id));
