@@ -103,11 +103,37 @@
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
     masterGain.connect(limiter);
-    limiter.connect(ctx.destination);
+    // 리미터가 놓친 순간 피크를 부드럽게 눌러 1.0을 넘지 않게 하는 마지막 안전장치
+    const pre = ctx.createGain();
+    pre.gain.value = 0.5; // WaveShaper 입력 범위(-1..1)에 ±2까지 담기 위해 절반으로
+    const clip = ctx.createWaveShaper();
+    clip.curve = softClipCurve();
+    clip.oversample = 'none'; // 오버샘플링 필터가 오히려 1.0을 넘게 튀어서 끔 (노이즈 소리라 차이 없음)
+    limiter.connect(pre);
+    pre.connect(clip);
+    clip.connect(ctx.destination);
   }
 
-  // 전체 크기 단계(1..10)를 귀에 자연스러운 곡선으로 변환. 최대치도 넉넉히 낮게 잡음.
-  function levelGain(level) { return 0.85 * Math.pow(level / MAX_LEVEL, 2); }
+  // 0.7까지는 그대로 통과시키고, 그 위는 1.0을 향해 부드럽게 눌러줌 (입력은 0.5배된 값)
+  function softClipCurve() {
+    const n = 4096;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = ((i / (n - 1)) * 2 - 1) * 2;
+      const a = Math.abs(x);
+      const y = a <= 0.7 ? a : 0.7 + 0.3 * Math.tanh((a - 0.7) / 0.3);
+      curve[i] = Math.sign(x) * y;
+    }
+    return curve;
+  }
+
+  // 전체 크기 단계(1..10)를 귀에 자연스러운 곡선으로 변환.
+  // 작은 단계는 섬세하게 유지하고, 위쪽 단계(7~10)에서 크게 올라가도록 4제곱 항을 더함.
+  // 최대(10)는 이전보다 약 8dB 큼. 피크는 리미터가 막아줌.
+  function levelGain(level) {
+    const x = level / MAX_LEVEL;
+    return 0.85 * x * x + 1.35 * Math.pow(x, 4);
+  }
   // 겹친 소리 하나의 크기: 기본값(7)일 때 보정값 그대로
   function layerGain(layer) {
     return (byId[layer.id].gain || 1) * Math.pow(layer.level / LAYER_DEFAULT, 2);
