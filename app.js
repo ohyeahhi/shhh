@@ -5,7 +5,12 @@
   const FADE = 1.5; // 재생/정지/소리 바꿀 때 페이드 시간(초)
   const TIMER_FADE = 30; // 자동 끄기 직전 서서히 줄어드는 시간(초)
   const NIGHT_IDLE = 20; // 재생 중 이 시간(초) 동안 손대지 않으면 화면 어둡게
-  const MAX_LEVEL = 10;
+  const MAX_LEVEL = 10; // 겹친 소리 하나하나의 크기 단계
+  // 전체 소리 크기: 20단계, 한 단계에 3dB씩. 1단계는 아주 작게, 20단계는 아주 크게.
+  const MASTER_STEPS = 20;
+  const MASTER_MAX_DB = 12;
+  const MASTER_STEP_DB = 3;
+  const MASTER_DEFAULT = 12;
   const MAX_LAYERS = 4; // 겹칠 수 있는 소리 수
   const LAYER_DEFAULT = 7; // 겹친 소리 하나하나의 기본 크기(1..10)
 
@@ -20,8 +25,7 @@
   const nowStatus = $('#now-status');
   const mixEl = $('#mix');
   const levelValue = $('#level-value');
-  const levelFill = $('#level-fill');
-  const levelMeter = $('#level-meter');
+  const levelRange = $('#level-range');
   const levelDown = $('#level-down');
   const levelUp = $('#level-up');
   const timerChips = document.querySelectorAll('#timer-chips button');
@@ -36,16 +40,17 @@
 
   // 기본 제공 설정 (삭제 불가)
   const BUILTIN_PRESETS = [
-    { id: 'b-nap', name: '낮잠', layers: [{ id: 'shush', level: 7 }], level: 5, timer: 30 },
-    { id: 'b-night', name: '밤잠', layers: [{ id: 'womb', level: 7 }], level: 4, timer: 0 },
-    { id: 'b-rain', name: '비 오는 밤', layers: [{ id: 'rain', level: 7 }, { id: 'womb', level: 5 }], level: 4, timer: 60 },
-    { id: 'b-forest', name: '숲속', layers: [{ id: 'stream', level: 7 }, { id: 'birds', level: 5 }, { id: 'wind', level: 4 }], level: 5, timer: 30 },
+    { id: 'b-nap', name: '낮잠', layers: [{ id: 'shush', level: 7 }], level: 12, timer: 30 },
+    { id: 'b-night', name: '밤잠', layers: [{ id: 'womb', level: 7 }], level: 11, timer: 0 },
+    { id: 'b-rain', name: '비 오는 밤', layers: [{ id: 'rain', level: 7 }, { id: 'womb', level: 5 }], level: 11, timer: 60 },
+    { id: 'b-forest', name: '숲속', layers: [{ id: 'stream', level: 7 }, { id: 'birds', level: 5 }, { id: 'wind', level: 4 }], level: 12, timer: 30 },
   ];
 
   const byId = {};
   Noise.sounds.forEach((s) => { byId[s.id] = s; });
 
   const state = migrate(load());
+  save(); // 이전된 형식을 바로 저장해 두 번 변환되지 않게 함
 
   let ctx = null;
   let masterGain = null;
@@ -71,14 +76,19 @@
     return out.slice(0, MAX_LAYERS);
   }
   function migrate(saved) {
-    const st = Object.assign({ level: 5, timer: 30, presets: [] }, saved);
+    // 예전 10단계 크기는 같은 크기로 들리는 20단계 값으로 옮김
+    const fromOld = saved.level != null && saved.scale !== MASTER_STEPS;
+    const st = Object.assign({ level: MASTER_DEFAULT, timer: 30, presets: [] }, saved);
+    if (fromOld) st.level = levelFromOld(st.level);
+    st.scale = MASTER_STEPS;
     st.layers = cleanLayers(st.layers, st.sound);
     if (!st.layers.length) st.layers = [{ id: 'shush', level: LAYER_DEFAULT }];
     delete st.sound;
     st.presets = (Array.isArray(st.presets) ? st.presets : [])
       .map((p) => {
         const layers = cleanLayers(p.layers, p.sound);
-        return { id: p.id, name: p.name, layers, level: p.level, timer: p.timer };
+        const level = fromOld ? levelFromOld(p.level) : p.level;
+        return { id: p.id, name: p.name, layers, level, timer: p.timer };
       })
       .filter((p) => p.layers.length);
     return st;
@@ -97,8 +107,8 @@
     masterGain.gain.value = 0;
     // 여러 소리를 겹쳐도 찢어지는 소리가 나지 않게 막아주는 리미터
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -6;
-    limiter.knee.value = 6;
+    limiter.threshold.value = -3;
+    limiter.knee.value = 3;
     limiter.ratio.value = 12;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
@@ -127,12 +137,18 @@
     return curve;
   }
 
-  // 전체 크기 단계(1..10)를 귀에 자연스러운 곡선으로 변환.
-  // 작은 단계는 섬세하게 유지하고, 위쪽 단계(7~10)에서 크게 올라가도록 4제곱 항을 더함.
-  // 최대(10)는 이전보다 약 8dB 큼. 피크는 리미터가 막아줌.
+  // 전체 크기 단계(1..20)를 dB 눈금으로 변환: 한 단계마다 3dB씩 커져서
+  // 어느 단계에서나 한 칸 차이가 비슷하게 들림. 20단계는 +12dB, 1단계는 -45dB.
+  // 큰 소리의 피크는 리미터와 소프트 클리퍼가 막아줌.
   function levelGain(level) {
-    const x = level / MAX_LEVEL;
-    return 0.85 * x * x + 1.35 * Math.pow(x, 4);
+    return Math.pow(10, (MASTER_MAX_DB - (MASTER_STEPS - level) * MASTER_STEP_DB) / 20);
+  }
+  // 예전 10단계 크기 곡선의 값과 가장 가깝게 들리는 새 단계
+  function levelFromOld(old) {
+    const x = Math.max(1, Math.min(10, Number(old) || 5)) / 10;
+    const db = 20 * Math.log10(0.85 * x * x + 1.35 * Math.pow(x, 4));
+    const level = Math.round(MASTER_STEPS - (MASTER_MAX_DB - db) / MASTER_STEP_DB);
+    return Math.max(1, Math.min(MASTER_STEPS, level));
   }
   // 겹친 소리 하나의 크기: 기본값(7)일 때 보정값 그대로
   function layerGain(layer) {
@@ -294,7 +310,7 @@
   }
 
   function setLevel(level) {
-    state.level = Math.max(1, Math.min(MAX_LEVEL, level));
+    state.level = Math.max(1, Math.min(MASTER_STEPS, level));
     applyMaster();
     save();
     update();
@@ -530,11 +546,11 @@
       btn.setAttribute('aria-label', byId[el.dataset.id].name + (on ? ' 빼기' : ' 겹치기'));
     });
 
-    levelValue.textContent = state.level + ' / ' + MAX_LEVEL;
-    levelFill.style.width = (state.level / MAX_LEVEL) * 100 + '%';
-    levelMeter.setAttribute('aria-valuenow', state.level);
+    levelValue.textContent = state.level + ' / ' + MASTER_STEPS;
+    levelRange.value = state.level;
+    levelRange.style.setProperty('--p', ((state.level - 1) / (MASTER_STEPS - 1)) * 100 + '%');
     levelDown.disabled = state.level <= 1;
-    levelUp.disabled = state.level >= MAX_LEVEL;
+    levelUp.disabled = state.level >= MASTER_STEPS;
 
     timerChips.forEach((c) => c.setAttribute('aria-checked', String(Number(c.dataset.min) === state.timer)));
 
@@ -579,6 +595,7 @@
   playBtn.addEventListener('click', () => (playing ? stop() : play()));
   levelDown.addEventListener('click', () => setLevel(state.level - 1));
   levelUp.addEventListener('click', () => setLevel(state.level + 1));
+  levelRange.addEventListener('input', () => setLevel(Number(levelRange.value)));
   timerChips.forEach((c) => c.addEventListener('click', () => setTimer(Number(c.dataset.min))));
   $('#night-btn').addEventListener('click', () => {
     if (!playing) play();
