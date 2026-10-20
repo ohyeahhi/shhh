@@ -1,6 +1,6 @@
 // 오프라인에서도 앱이 열리도록 정적 파일을 캐시합니다.
-const CACHE = 'shhh-v11';
-const FILES = ['./', 'index.html', 'style.css', 'noise.js', 'app.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'shhh-v12';
+const FILES = ['./', 'index.html', 'style.css', 'noise.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)));

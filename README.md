@@ -22,7 +22,27 @@
 - **안전 안내:** 기기 거리·볼륨 안내 표시
 - 오프라인 동작, 잠금화면·이어폰 버튼으로 재생/정지
 
-## 실행
+## 사용하기
+
+👉 **https://ohyeahhi.github.io/shhh/**
+
+휴대폰 브라우저로 위 주소를 열고 **홈 화면에 추가**하면 앱처럼 쓸 수 있어요.
+한 번 열어두면 인터넷이 없어도 동작합니다.
+
+- 아이폰(Safari): 아래쪽 공유 버튼 → **홈 화면에 추가**
+- 안드로이드(Chrome): 오른쪽 위 ⋮ 메뉴 → **홈 화면에 추가** (또는 **앱 설치**)
+
+## 배포
+
+GitHub Pages로 배포합니다. 빌드 과정 없이 저장소의 파일이 그대로 올라갑니다.
+
+1. 저장소 **Settings → Pages**
+2. **Source: Deploy from a branch**, Branch: `claude/confident-hopper-90q86y`, 폴더: `/ (root)` → **Save**
+3. 1~2분 뒤 https://ohyeahhi.github.io/shhh/ 에서 열림. 이후 이 브랜치에 푸시하면 자동으로 다시 배포됩니다.
+
+앱을 고친 뒤에는 `sw.js`의 `CACHE` 이름(예: `shhh-v12`)을 올려야 이미 설치한 휴대폰에도 새 버전이 받아집니다.
+
+## 로컬 실행
 
 빌드 과정이 없는 정적 파일이라 아무 웹 서버로 열면 됩니다.
 
@@ -31,7 +51,6 @@ python3 -m http.server 8000
 # 브라우저에서 http://localhost:8000 열기
 ```
 
-휴대폰에서 쓰려면 GitHub Pages 등에 올린 뒤 브라우저 메뉴에서 **홈 화면에 추가**를 누르세요.
 (서비스 워커는 HTTPS 또는 localhost에서만 동작합니다.)
 
 ## 파일 구조
@@ -43,6 +62,7 @@ python3 -m http.server 8000
 | `noise.js` | 소리 합성 (각 소리를 끊김 없이 반복되는 버퍼로 생성, 소리별 크기 보정) |
 | `app.js` | 재생, 소리 겹치기, 크기, 자동 끄기, 화면 어둡게, 설정 저장 |
 | `sw.js` | 오프라인 캐시 |
-| `manifest.webmanifest`, `icon.svg` | PWA 설정과 아이콘 |
+| `manifest.webmanifest`, `icon.svg`, `*.png` | PWA 설정과 앱 아이콘 |
+| `.nojekyll` | GitHub Pages가 파일을 가공하지 않고 그대로 올리게 함 |
 
 새 소리를 추가하려면 `noise.js`의 `sounds` 배열에 생성 함수와 묶음(`group`)을 지정해 항목을 하나 추가하면 됩니다.
